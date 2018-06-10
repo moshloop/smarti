@@ -1,8 +1,13 @@
 
 [[constraint]]
   name = "github.com/spf13/cobra"
-
 [[constraint]]
-  branch = "master"
-  name = "github.com/logrusorgru/aurora"
-
+  name = "github.com/flosch/pongo2"
+[[constraint]]
+  name = "github.com/sirupsen/logrus"
+[[constraint]]
+  name = "gopkg.in/yaml.v2"
+[[constraint]]
+  name = "github.com/knq/ini"
+[[constraint]]
+  name = "github.com/hashicorp/go-getter"
