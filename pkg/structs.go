@@ -24,6 +24,9 @@ type Inventory struct {
 }
 
 func (inv Inventory) AddGroup(group Group) {
+	if group.Vars == nil {
+		group.Vars = make(map[string]interface{})
+	}
 	inv.Groups[group.Name] = group
 }
 

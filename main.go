@@ -33,7 +33,7 @@ func main() {
 	root.PersistentFlags().StringP("limit", "l", "", "further limit selected hosts to an additional pattern")
 	root.PersistentFlags().CountP("loglevel", "v", "Increase logging level")
 
-	root.AddCommand(&cmd.List, &cmd.Group, &cmd.Host)
+	root.AddCommand(&cmd.List, &cmd.Group, &cmd.Host, &cmd.Template)
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)

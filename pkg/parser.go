@@ -35,16 +35,43 @@ func Parse(cmd *cobra.Command) Inventory {
 }
 
 func ParseInventory(dir string, inventory Inventory) {
-	log.Infof("Parsing inventory: " + dir)
 
-	ParseGroups(dir+"/group_vars", inventory)
-	ParseGroupIni(dir, inventory)
+	if _, err := os.Stat(dir); err != nil {
+		log.Infof("Parsing inventory from string: " + dir)
+
+		for _, host := range strings.Split(dir, ",") {
+			inventory.AddHost(Host{
+				Name: host,
+			})
+
+		}
+	} else {
+		log.Infof("Parsing inventory from file: " + dir)
+		ParseGroups(dir+"/group_vars", inventory)
+		ParseGroupIni(dir, inventory)
+	}
+
+	if  _, present := inventory.Groups["all"]; !present {
+		inventory.AddGroup(Group{
+			Name: "all",
+		})
+	}
+	log.Infof("Groups: %s", inventory.Groups)
+	log.Infof("Hosts: %s", inventory.Hosts)
+
 }
 
 func ParseExtraVars(extra []string, inventory Inventory) {
 	for _, val := range extra {
-		parts := strings.Split(val, "=")
-		inventory.Vars[parts[0]] = parts[1]
+		if strings.HasPrefix(val, "@") {
+			vars := ParseFile(val[1:], inventory)
+			for key := range vars {
+				inventory.Vars[key] = vars[key]
+			}
+		} else {
+			parts := strings.Split(val, "=")
+			inventory.Vars[parts[0]] = parts[1]
+		}
 	}
 }
 
@@ -128,15 +155,15 @@ func FindImports(bytes []byte, inventory Inventory) map[string]interface{} {
 
 	for _, comment := range regexp.MustCompile("(?m)(# @import.*)").FindAllString(s, -1) {
 		source := strings.Replace(comment, "# @import ", "", -1)
-		path  := "/"
-		if strings.Contains( source,"#") {
+		path := "/"
+		if strings.Contains(source, "#") {
 			path += strings.Split(source, "#")[1]
 			source = strings.Split(source, "#")[0]
 		}
-		log.Infof("Import %s / %s", source,path)
+		log.Infof("Import %s / %s", source, path)
 		pwd, _ := os.Getwd()
 		dst := pwd + "/.getter/" + regexp.MustCompile("[^0-9a-zA-z]*").ReplaceAllString(source, "")
-		err := getter.Get(dst,source)
+		err := getter.Get(dst, source)
 		if err != nil {
 			log.Fatal("Error retrieving %s: \n %s", source, err)
 			return vars
@@ -145,10 +172,10 @@ func FindImports(bytes []byte, inventory Inventory) map[string]interface{} {
 		dst = dst + path
 		if stat, err := os.Stat(dst); stat.IsDir() {
 			ParseInventory(dst, inventory)
-		} else if err == nil{
+		} else if err == nil {
 			PutAll(ParseFile(dst, inventory), vars)
 		} else {
-			log.Fatal("Sub file does not exist: " + dst  )
+			log.Fatal("Sub file does not exist: " + dst)
 
 		}
 	}
