@@ -63,7 +63,7 @@
 
 [[constraint]]
   name = "github.com/docker/cli"
-  revision = "9b7656cc05d2878c85dc1252f5813f0ad77d808f"
+  tag = "v18.06.1-ce"
 
 [[override]]
   name = "github.com/docker/swarmkit"
