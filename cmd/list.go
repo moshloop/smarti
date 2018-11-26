@@ -10,6 +10,7 @@ import (
 var (
 	List = cobra.Command{
 		Use:  "list",
+		Short: "Mimics the ansible-inventory --list command",
 		Args: cobra.MinimumNArgs(0),
 		Run: func(cmd *cobra.Command, args []string) {
 

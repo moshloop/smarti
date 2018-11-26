@@ -25,15 +25,16 @@ func main() {
 
 	}
 
-	root.PersistentFlags().StringP("inventory", "i", "", "specify inventory host path or comma separated host list")
+	root.PersistentFlags().StringP("inventory", "i", "", "Specify inventory host path or comma separated host list")
 	root.PersistentFlags().Bool("version", false, "")
-	root.PersistentFlags().StringSliceP("extra-vars", "e", []string{}, " set additional variables as key=value or YAML/JSON, if filename prepend with @")
-	root.PersistentFlags().StringP("limit", "l", "", "further limit selected hosts to an additional pattern")
+	root.PersistentFlags().StringSliceP("extra-vars", "e", []string{}, "Set additional variables as key=value or YAML/JSON, if filename prepend with @")
+	root.PersistentFlags().StringP("limit", "l", "", "Limit selected hosts to an additional pattern")
 	root.PersistentFlags().CountP("loglevel", "v", "Increase logging level")
 
 	cmd.Containers.AddCommand(&cmd.Versions)
+	cmd.Containers.AddCommand(&cmd.Spec)
 	cmd.Containers.PersistentFlags().String("image-versions", "", "A path to yml or json file containing image versions")
-	root.AddCommand(&cmd.List, &cmd.Group, &cmd.Host, &cmd.Template, &cmd.Containers)
+	root.AddCommand(&cmd.List, &cmd.Containers)
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
