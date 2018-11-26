@@ -69,6 +69,6 @@
   name = "github.com/docker/swarmkit"
   revision = "9f271c2963d18a7c60d2c4001fb418ca4037df19"
 
-[[constraint]]
-  branch = "master"
-  name = "github.com/docker/docker"
+[[override]]
+  name = "github.com/xeipuuv/gojsonschema"
+  revision = "0c8571ac0ce161a5feb57375a9cdf148c98c0f70"
