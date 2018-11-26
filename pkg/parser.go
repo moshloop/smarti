@@ -2,22 +2,21 @@ package pkg
 
 import (
 	"io/ioutil"
-	"gopkg.in/yaml.v2"
 	"os"
 	"github.com/spf13/cobra"
 	"path"
 	"strings"
 	"github.com/knq/ini"
 	"regexp"
-
+	"github.com/getlantern/deepcopy"
 	log "github.com/sirupsen/logrus"
-	"github.com/hashicorp/go-getter"
+	"sync"
 )
 
 func Parse(cmd *cobra.Command) Inventory {
 	dir := cmd.Flag("inventory").Value.String()
-
 	inventory := NewInventory()
+	inventory.Limit = cmd.Flag("limit").Value.String()
 
 	inventory.Vars["inventory_name"] = path.Base(dir)
 	inventory.Vars["inventory_dir"] = dir
@@ -26,18 +25,65 @@ func Parse(cmd *cobra.Command) Inventory {
 	ParseExtraVars(extra, inventory)
 
 	ParseInventory(dir, inventory)
-
+	ContainerDefaults(inventory)
 	//var hosts = make(map[string]*Host)
 
+
+	imageVersions, _ := cmd.Flags().GetString("image-versions")
+	log.Infof("Using image versions from: %s", imageVersions)
+	if imageVersions != "" {
+		versions := ParseFile(imageVersions, inventory)
+		log.Debugf("Parsed image versions: %v", versions)
+		inventory.Vars["image_versions"] = versions
+	}
 	inventory.Merge()
+
+	wg := new(sync.WaitGroup)
+	for _, group := range inventory.Groups {
+		for _, c := range group.Containers {
+			wg.Add(1)
+			go func(c *Container) {
+				c.PostProcess()
+				log.Debugf("Finished processing %s", c.Image)
+				wg.Done()
+			}(c)
+		}
+	}
+	wg.Wait()
 	return inventory
+}
+
+
+
+func ContainerDefaults(inv Inventory) {
+
+	for _, group := range inv.Groups {
+		containers := group.Vars["containers"]
+
+		if containers != nil {
+			for _, container := range containers.([]interface{}) {
+				c := new(Container)
+				deepcopy.Copy(c, container)
+				c.Group = *group
+				group.Containers = append(group.Containers, c)
+			}
+		}
+
+		compose_files := group.Vars["docker_compose_v3"]
+		if compose_files != nil {
+			for _, file := range compose_files.([]interface{}) {
+				containers := NewContainerFromCompose(file.(string), *group)
+				group.Containers = append(group.Containers, containers...)
+			}
+		}
+	}
 
 }
 
-func ParseInventory(dir string, inventory Inventory) {
 
+func ParseInventory(dir string, inventory Inventory) {
 	if _, err := os.Stat(dir); err != nil {
-		log.Infof("Parsing inventory from string: " + dir)
+		log.Debugf("Parsing inventory from string: " + dir)
 
 		for _, host := range strings.Split(dir, ",") {
 			inventory.AddHost(Host{
@@ -46,18 +92,18 @@ func ParseInventory(dir string, inventory Inventory) {
 
 		}
 	} else {
-		log.Infof("Parsing inventory from file: " + dir)
+		log.Debugf("Parsing inventory from file: " + dir)
 		ParseGroups(dir+"/group_vars", inventory)
 		ParseGroupIni(dir, inventory)
 	}
 
-	if  _, present := inventory.Groups["all"]; !present {
+	if _, present := inventory.Groups["all"]; !present {
 		inventory.AddGroup(Group{
 			Name: "all",
 		})
 	}
-	log.Infof("Groups: %s", inventory.Groups)
-	log.Infof("Hosts: %s", inventory.Hosts)
+	log.Debugf("Groups: %s", inventory.Groups)
+	log.Debugf("Hosts: %s", inventory.Hosts)
 
 }
 
@@ -75,18 +121,6 @@ func ParseExtraVars(extra []string, inventory Inventory) {
 	}
 }
 
-func SafeRead(file string) string {
-	if _, err := os.Stat(file); err != nil {
-		return ""
-	}
-
-	data, err := ioutil.ReadFile(file)
-	if err != nil {
-		return ""
-	}
-
-	return string(data[:])
-}
 
 func ParseGroupIni(dir string, inventory Inventory) {
 
@@ -147,50 +181,4 @@ func ParseGroups(dir string, inventory Inventory) {
 		}
 		inventory.AddGroup(group)
 	}
-}
-
-func FindImports(bytes []byte, inventory Inventory) map[string]interface{} {
-	s := string(bytes[:])
-	vars := make(map[string]interface{})
-
-	for _, comment := range regexp.MustCompile("(?m)(# @import.*)").FindAllString(s, -1) {
-		source := strings.Replace(comment, "# @import ", "", -1)
-		path := "/"
-		if strings.Contains(source, "#") {
-			path += strings.Split(source, "#")[1]
-			source = strings.Split(source, "#")[0]
-		}
-		log.Infof("Import %s / %s", source, path)
-		pwd, _ := os.Getwd()
-		dst := pwd + "/.getter/" + regexp.MustCompile("[^0-9a-zA-z]*").ReplaceAllString(source, "")
-		err := getter.Get(dst, source)
-		if err != nil {
-			log.Fatal("Error retrieving %s: \n %s", source, err)
-			return vars
-		}
-
-		dst = dst + path
-		if stat, err := os.Stat(dst); stat.IsDir() {
-			ParseInventory(dst, inventory)
-		} else if err == nil {
-			PutAll(ParseFile(dst, inventory), vars)
-		} else {
-			log.Fatal("Sub file does not exist: " + dst)
-
-		}
-	}
-	return vars
-
-}
-
-func ParseFile(file string, inventory Inventory) map[string]interface{} {
-	log.Infof("Parsing %s", file)
-	bytes, err := ioutil.ReadFile(file)
-	vars := FindImports(bytes, inventory)
-	if err != nil {
-		log.Error(err)
-		return vars
-	}
-	yaml.Unmarshal(bytes, &vars)
-	return vars
 }

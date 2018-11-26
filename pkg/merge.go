@@ -103,6 +103,8 @@ func Interpolate(key interface{}, vars map[string]interface{}) interface{} {
 			out[subkey.(string)] = Interpolate(val, vars)
 		}
 		return out
+	case bool, int, float32, float64:
+		return v
 
 	default:
 		log.Warningf("Unknown type: %s", reflect.TypeOf(key))
@@ -116,7 +118,7 @@ func PutAll(src map[string]interface{}, dst map[string]interface{}) {
 	}
 }
 
-func InterpolateGroups(groups map[string]Group) {
+func InterpolateGroups(groups map[string]*Group) {
 	for _, group := range groups {
 		for key, value := range group.Vars {
 			group.Vars[key] = Interpolate(value, group.Vars)
