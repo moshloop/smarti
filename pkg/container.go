@@ -64,6 +64,12 @@ func (port ContainerPort) String() string {
 	return fmt.Sprintf("%d:%d", port.Published, port.Target)
 }
 
+func ToName(name string) string {
+	path := strings.Split(name, "/")
+	name = path[len(path)-1]
+	return strings.ToLower(name)
+}
+
 func (c *Container) PostProcess() {
 	//containers_default_mem
 	//containers_default_cpu
@@ -79,12 +85,14 @@ func (c *Container) PostProcess() {
 	}
 
 	if c.ContainerName == "" {
-		c.ContainerName = c.ImageName
+		c.ContainerName = ToName(c.ImageName)
 	}
 
 	if c.Service == "" {
 		c.Service = c.ImageName
 	}
+
+	c.Service = ToName(c.Service)
 
 	if c.Cpu == "0" || c.Cpu == 0 {
 		c.Cpu = ""
@@ -130,7 +138,7 @@ func (c Container) String() string {
 }
 
 func (c Container) ToMem() resource.Quantity {
-	qty, _ := resource.ParseQuantity(strconv.Itoa(c.Mem))
+	qty, _ := resource.ParseQuantity(strconv.Itoa(c.Mem) + "m")
 	return qty
 }
 
