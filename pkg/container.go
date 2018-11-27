@@ -65,6 +65,11 @@ func (port ContainerPort) String() string {
 }
 
 func (c *Container) PostProcess() {
+	//containers_default_mem
+	//containers_default_cpu
+	//{{_docker_registry}}/{{_image}}
+	//force_sha
+	//labels
 
 	c.ImageName = strings.Split(c.Image, ":")[0]
 	if strings.Contains(c.Image, ":") {
@@ -76,6 +81,16 @@ func (c *Container) PostProcess() {
 	if c.ContainerName == "" {
 		c.ContainerName = c.ImageName
 	}
+
+	if c.Service == "" {
+		c.Service = c.ImageName
+	}
+
+	if c.Cpu == "0" || c.Cpu == 0 {
+		c.Cpu = ""
+	}
+
+	log.Infof("%s: %s", c.ImageName, c.Cpu)
 
 	versions := c.Group.Vars["image_versions"]
 	versionsMap := make(map[string]interface{})
@@ -171,7 +186,7 @@ func (c Container) ToResources() v1.ResourceRequirements {
 		limits[v1.ResourceMemory] = c.ToMem()
 	}
 	cpu, err := c.ToCpu()
-	if err == nil {
+	if err == nil && cpu.Value() > 0 {
 		limits[v1.ResourceCPU] = cpu
 	}
 
@@ -212,10 +227,12 @@ func (c Container) ToContainer() v1.Container {
 	}
 
 	if len(c.Commands) > 0 {
+		var sh []string
+		sh = []string{"sh", "-c", strings.Join(c.Commands, ";")}
 		container.Lifecycle = &v1.Lifecycle{
 			PostStart: &v1.Handler{
 				Exec: &v1.ExecAction{
-					Command: c.Commands,
+					Command: sh,
 				},
 			},
 		}
@@ -225,6 +242,16 @@ func (c Container) ToContainer() v1.Container {
 	}
 	container.Env = c.ToEnvVars()
 	return container
+}
+
+func (c Container) ToServiceType() v1.ServiceType {
+
+	if c.ServiceType == "dnsrr" || c.ServiceType == "NodePort" {
+		return v1.ServiceTypeNodePort
+	} else if strings.ToLower(c.ServiceType) == "loadbalancer" {
+		return v1.ServiceTypeLoadBalancer
+	}
+	return v1.ServiceTypeClusterIP
 }
 
 func (c Container) ToDeployment() string {
@@ -268,6 +295,7 @@ func (c Container) ToDeployment() string {
 				Name: c.Service,
 			},
 			Spec: v1.ServiceSpec{
+				Type: c.ToServiceType(),
 				Selector: map[string]string{
 					"app": c.Service,
 				},
