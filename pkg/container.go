@@ -138,7 +138,7 @@ func (c Container) String() string {
 }
 
 func (c Container) ToMem() resource.Quantity {
-	qty, _ := resource.ParseQuantity(strconv.Itoa(c.Mem) + "m")
+	qty, _ := resource.ParseQuantity(strconv.Itoa(c.Mem) + "Mi")
 	return qty
 }
 
