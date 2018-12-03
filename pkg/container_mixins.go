@@ -25,7 +25,11 @@ type HarborImage struct {
 }
 
 func LatestToTagHarbor(c *Container) {
-	all := c.Group.Vars["latest_to_tag_harbor"] == "all"
+	var all bool
+
+	if c.Group.Vars["latest_to_tag_harbor"] == "all" {
+		all = true
+	}
 	var tag string
 	image := strings.Split(c.Image, ":")[0]
 	if strings.Contains(c.Image, ":") {
@@ -65,13 +69,18 @@ func LatestToTagHarbor(c *Container) {
 		response.JSON(&imgs)
 
 		if len(imgs) == 0 {
-			log.Errorf("[%s] No tags found", c.Image)
+			log.Errorf("[%s] No tags found", c.ImageName)
 		} else {
 			sort.Slice(imgs, func(i int, j int) bool {
 				return imgs[j].Created.Before(imgs[i].Created)
 			})
-			log.Infof("[%s] Found tag %s created %s", image, imgs[0].Name, imgs[0].Created)
-			c.Image = strings.Split(image, ":")[0] + ":" + imgs[0].Name
+			tag := imgs[0]
+			if tag.Name == "latest" && len(imgs) > 1 {
+				tag = imgs[1]
+			}
+			log.Debugf("[%s] Found tag %s created %s", image, tag.Name, tag.Created)
+			c.ImageTag = tag.Name
+			c.Image = c.ImageName + ":" + c.ImageTag
 		}
 	}
 

@@ -37,7 +37,7 @@ type Container struct {
 	ServiceType    string            `json:"service_type,omitempty"`
 	Mem            int               `json:"mem,omitempty"`
 	Cpu            StringOrInt       `json:"cpu,omitempty"`
-	Replicas       *int32            `json:"replicas,omitempty"`
+	Replicas       int32             `json:"replicas,omitempty"`
 	Commands       []string          `json:"commands,omitempty"`
 	Env            map[string]string `json:"env,omitempty"`
 	Files          map[string]string `json:"files,omitempty"`
@@ -67,15 +67,67 @@ func (port ContainerPort) String() string {
 func ToName(name string) string {
 	path := strings.Split(name, "/")
 	name = path[len(path)-1]
-	return strings.ToLower(name)
+	return strings.Replace(strings.ToLower(name), ".", "", -1)
 }
 
 func (c *Container) PostProcess() {
-	//containers_default_mem
-	//containers_default_cpu
 	//{{_docker_registry}}/{{_image}}
 	//force_sha
 	//labels
+	_defaults, ok := c.Group.Vars["container_defaults"]
+	var defaults map[string]interface{}
+	if ok {
+		defaults = _defaults.(map[string]interface{})
+	}
+
+	env, ok := defaults["env"]
+	if ok {
+		_env := make(map[string]string)
+		for k, v := range env.(map[string]interface{}) {
+			_env[k] = fmt.Sprintf("%s", v)
+		}
+		for k, v := range c.Env {
+			_env[k] = v
+		}
+		c.Env = _env
+		log.Debugf("[%s] %s", c.ImageName, env)
+	}
+
+	mem, ok := defaults["mem"]
+	if c.Mem == 0 && ok {
+		switch mem.(type) {
+		case int:
+			c.Mem = mem.(int)
+		case float64:
+			c.Mem = int(mem.(float64))
+		}
+	}
+
+	replicas, ok := defaults["replicas"]
+	if c.Replicas == 0 {
+		switch v := replicas.(type) {
+		case int32:
+			c.Replicas = int32(v)
+		case float64:
+			c.Replicas = int32(v)
+		case string:
+			replicas, _ := strconv.Atoi(v)
+			c.Replicas = int32(replicas)
+		}
+	}
+
+	ServiceType, ok := defaults["service_type"]
+	if c.ServiceType == "" && ok {
+		c.ServiceType = ServiceType.(string)
+	}
+
+	if c.Cpu == "0" || c.Cpu == 0 || c.Cpu == nil {
+		c.Cpu = ""
+	}
+	cpu, ok := defaults["cpu"]
+	if c.Cpu == "" || c.Cpu == nil || c.Cpu == 0 && ok {
+		c.Cpu = cpu
+	}
 
 	c.ImageName = strings.Split(c.Image, ":")[0]
 	if strings.Contains(c.Image, ":") {
@@ -94,11 +146,6 @@ func (c *Container) PostProcess() {
 
 	c.Service = ToName(c.Service)
 
-	if c.Cpu == "0" || c.Cpu == 0 {
-		c.Cpu = ""
-	}
-
-	log.Infof("%s: %s", c.ImageName, c.Cpu)
 
 	versions := c.Group.Vars["image_versions"]
 	versionsMap := make(map[string]interface{})
@@ -119,6 +166,8 @@ func (c *Container) PostProcess() {
 	if c.Group.Vars["latest_to_tag_harbor"] == "true" || c.Group.Vars["latest_to_tag_harbor"] == "all" {
 		LatestToTagHarbor(c)
 	}
+	log.Infof("%-25s cpu=%.f, mem=%d, tag=%s ", c.ImageName, c.Cpu, c.Mem, c.ImageTag)
+
 
 }
 
@@ -145,9 +194,11 @@ func (c Container) ToMem() resource.Quantity {
 func (c Container) ToCpu() (resource.Quantity, error) {
 	var qty resource.Quantity
 	switch v := c.Cpu.(type) {
-
 	case int:
 		qty, _ = resource.ParseQuantity(strconv.Itoa(v))
+		break
+	case float64:
+		qty, _ = resource.ParseQuantity(strconv.Itoa(int(v)))
 		break
 	case string:
 		qty, _ = resource.ParseQuantity(v)
@@ -275,7 +326,7 @@ func (c Container) ToDeployment() string {
 			Name: c.Service,
 		},
 		Spec: v1beta1.DeploymentSpec{
-			Replicas: c.Replicas,
+			Replicas: &c.Replicas,
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
 					"app": c.Service,
@@ -293,8 +344,10 @@ func (c Container) ToDeployment() string {
 				},
 			},
 		},
-	},
-		v1.Service{
+	})
+
+	if len(c.Ports) > 0 {
+		specs = append(specs, v1.Service{
 			TypeMeta: metav1.TypeMeta{
 				Kind:       "Service",
 				APIVersion: "v1",
@@ -309,8 +362,8 @@ func (c Container) ToDeployment() string {
 				},
 				Ports: c.ToPorts(),
 			},
-		},
-	)
+		})
+	}
 
 	out := ""
 	for _, spec := range specs {
@@ -340,66 +393,67 @@ func (c *Container) ToConfigMaps() []interface{} {
 	if c.K8VolumeMounts == nil {
 		c.K8VolumeMounts = []v1.VolumeMount{}
 	}
-
+	cms := make(map[string]map[string]string)
 	for _path, file := range c.Files {
-		name := ConfigMapName(_path)
+		dir := path.Dir(_path)
 		str, _ := ioutil.ReadFile("files/" + file)
-		configs = append(configs, NewConfigMap(_path, string(str)))
+		cm, exists := cms[dir]
 
-		c.K8Volumes = append(c.K8Volumes, v1.Volume{
-			Name: name,
-			VolumeSource: v1.VolumeSource{
-				ConfigMap: &v1.ConfigMapVolumeSource{
-					LocalObjectReference: v1.LocalObjectReference{
-						Name: name,
-					},
-				},
-			},
-		})
-		c.K8VolumeMounts = append(c.K8VolumeMounts, v1.VolumeMount{
-			Name:      name,
-			MountPath: path.Dir(_path),
-		})
+		if !exists {
+			cm = make(map[string]string)
+			cms[dir] = cm
+		}
 
+		cm[path.Base(_path)] = string(str)
 	}
 
 	for _path, file := range c.Templates {
-		name := ConfigMapName(_path)
+		dir := path.Dir(_path)
 		data, _ := ioutil.ReadFile("files/" + file)
 		template := ConvertSyntaxFromJinjaToPongo(string(data))
 		tpl, err := pongo2.FromString(template)
 		if err != nil {
 			log.Warnf("Error parsing: %s: %v", template, err)
-			configs = append(configs, NewConfigMap(_path, string(data)))
+			continue
 		}
 		out, err := tpl.Execute(c.Group.Vars)
 		if err != nil {
 			log.Warnf("Error parsing: %s: %v", template, err)
-			configs = append(configs, NewConfigMap(_path, string(data)))
+			continue
 		}
 
-		configs = append(configs, NewConfigMap(_path, out))
+		cm, exists := cms[dir]
+
+		if !exists {
+			cm = make(map[string]string)
+			cms[dir] = cm
+		}
+
+		cm[path.Base(_path)] = string(out)
+	}
+
+	for name, cm := range cms {
 		c.K8Volumes = append(c.K8Volumes, v1.Volume{
-			Name: name,
+			Name: ConfigMapName(name),
 			VolumeSource: v1.VolumeSource{
 				ConfigMap: &v1.ConfigMapVolumeSource{
 					LocalObjectReference: v1.LocalObjectReference{
-						Name: name,
+						Name: ConfigMapName(name),
 					},
 				},
 			},
 		})
 		c.K8VolumeMounts = append(c.K8VolumeMounts, v1.VolumeMount{
-			Name:      name,
-			MountPath: path.Dir(_path),
+			Name:      ConfigMapName(name),
+			MountPath: name,
 		})
-
+		configs = append(configs, NewConfigMap(name, cm))
 	}
 
 	return configs
 }
 
-func NewConfigMap(_path string, content string) v1.ConfigMap {
+func NewConfigMap(_path string, content map[string]string) v1.ConfigMap {
 	return v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: ConfigMapName(_path),
@@ -408,7 +462,7 @@ func NewConfigMap(_path string, content string) v1.ConfigMap {
 			APIVersion: "v1",
 			Kind:       "ConfigMap",
 		},
-		Data: map[string]string{path.Base(_path): content},
+		Data: content,
 	}
 }
 
@@ -455,7 +509,7 @@ func NewContainerFromCompose(file string, group Group) []*Container {
 			}
 			if service.Deploy.Replicas != nil {
 				replicas := int32(*service.Deploy.Replicas)
-				c.Replicas = &replicas
+				c.Replicas = replicas
 			}
 
 			if service.Deploy.EndpointMode != "" {
@@ -519,7 +573,6 @@ func NewContainerFromCompose(file string, group Group) []*Container {
 			if service.WorkingDir != "" {
 				c.WorkingDir = service.WorkingDir
 			}
-
 
 			log.Infof("New compose container: %s", c)
 			containers = append(containers, c)
