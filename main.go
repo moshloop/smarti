@@ -33,6 +33,8 @@ func main() {
 
 	cmd.Containers.AddCommand(&cmd.Versions)
 	cmd.Containers.AddCommand(&cmd.Spec)
+	cmd.Containers.AddCommand(&cmd.Health)
+	cmd.Health.Flags().Bool("print", false, "Print IP:PORT details for running services (useful to pipe into xargs for additional checks)")
 	cmd.Containers.PersistentFlags().String("image-versions", "", "A path to yml or json file containing image versions")
 	root.AddCommand(&cmd.List, &cmd.Containers)
 
