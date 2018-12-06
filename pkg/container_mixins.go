@@ -27,7 +27,7 @@ type HarborImage struct {
 func LatestToTagHarbor(c *Container) {
 	var all bool
 
-	if c.Group.Vars["latest_to_tag_harbor"] == "all" {
+	if c.Group.Get("latest_to_tag_harbor") == "all" {
 		all = true
 	}
 	var tag string

@@ -48,6 +48,8 @@ type Container struct {
 	ContainerName  string            `json:"container_name,omitempty"`
 	Ports          []ContainerPort   `json:"ports,omitempty"`
 	Source         interface{}       `json:"source,omitempty"`
+	ReadinessProbe *HealthCheck
+	LivenessProbe  *HealthCheck
 	Group          Group
 	K8VolumeMounts []v1.VolumeMount
 	K8Volumes      []v1.Volume
@@ -58,6 +60,27 @@ type ContainerPort struct {
 	Target    int
 	Name      string
 	Protocol  string
+}
+
+type HealthCheck struct {
+	Cmd     string
+	Url     string
+	Port    int
+	Period  int32
+	Timeout int32
+	Delay   int32
+}
+
+type ContainerDefaults struct {
+	ReadinessProbe *HealthCheck
+	LivenessProbe  *HealthCheck
+	ServiceType    string            `json:"service_type,omitempty"`
+	Replicas       int32             `json:"replicas,omitempty"`
+	Mem            int               `json:"mem,omitempty"`
+	Cpu            StringOrInt       `json:"cpu,omitempty"`
+	Env            map[string]string `json:"env,omitempty"`
+	Labels         map[string]string `json:"labels,omitempty"`
+	Annotations    map[string]string `json:"annotations,omitempty"`
 }
 
 func (port ContainerPort) String() string {
@@ -74,59 +97,36 @@ func (c *Container) PostProcess() {
 	//{{_docker_registry}}/{{_image}}
 	//force_sha
 	//labels
-	_defaults, ok := c.Group.Vars["container_defaults"]
-	var defaults map[string]interface{}
-	if ok {
-		defaults = _defaults.(map[string]interface{})
+	defaults := c.Group.ContainerDefaults
+
+	env := make(map[string]string)
+
+	for k,v := range defaults.Env {
+		env[k] = v
+	}
+	for k,v := range c.Env {
+		env[k] = v
+	}
+	c.Env = env
+
+	if c.Mem == 0 {
+		c.Mem = defaults.Mem
 	}
 
-	env, ok := defaults["env"]
-	if ok {
-		_env := make(map[string]string)
-		for k, v := range env.(map[string]interface{}) {
-			_env[k] = fmt.Sprintf("%s", v)
-		}
-		for k, v := range c.Env {
-			_env[k] = v
-		}
-		c.Env = _env
-		log.Debugf("[%s] %s", c.ImageName, env)
-	}
-
-	mem, ok := defaults["mem"]
-	if c.Mem == 0 && ok {
-		switch mem.(type) {
-		case int:
-			c.Mem = mem.(int)
-		case float64:
-			c.Mem = int(mem.(float64))
-		}
-	}
-
-	replicas, ok := defaults["replicas"]
 	if c.Replicas == 0 {
-		switch v := replicas.(type) {
-		case int32:
-			c.Replicas = int32(v)
-		case float64:
-			c.Replicas = int32(v)
-		case string:
-			replicas, _ := strconv.Atoi(v)
-			c.Replicas = int32(replicas)
-		}
+		c.Replicas = defaults.Replicas
 	}
 
-	ServiceType, ok := defaults["service_type"]
-	if c.ServiceType == "" && ok {
-		c.ServiceType = ServiceType.(string)
+	log.Errorf("c=%s, default=%s", c.ServiceType, defaults.ServiceType)
+	if c.ServiceType == "" {
+		c.ServiceType = defaults.ServiceType
 	}
 
 	if c.Cpu == "0" || c.Cpu == 0 || c.Cpu == nil {
 		c.Cpu = ""
 	}
-	cpu, ok := defaults["cpu"]
-	if c.Cpu == "" || c.Cpu == nil || c.Cpu == 0 && ok {
-		c.Cpu = cpu
+	if c.Cpu == "" || c.Cpu == nil || c.Cpu == 0 {
+		c.Cpu = defaults.Cpu
 	}
 
 	c.ImageName = strings.Split(c.Image, ":")[0]
@@ -143,9 +143,31 @@ func (c *Container) PostProcess() {
 	if c.Service == "" {
 		c.Service = c.ImageName
 	}
-
 	c.Service = ToName(c.Service)
 
+	if len(c.Ports) > 0 && c.ReadinessProbe == nil {
+		c.ReadinessProbe = &HealthCheck{
+			Port: c.Ports[0].Target,
+		}
+
+		if defaults.ReadinessProbe != nil && defaults.ReadinessProbe.Delay > 0 {
+			c.ReadinessProbe.Delay = defaults.ReadinessProbe.Delay
+		}
+	}
+
+	if c.ReadinessProbe != nil && c.LivenessProbe == nil {
+		c.LivenessProbe = c.ReadinessProbe
+	}
+	if c.LivenessProbe != nil && defaults.LivenessProbe != nil{
+		if c.LivenessProbe.Timeout == 0 {
+			c.LivenessProbe.Timeout = defaults.LivenessProbe.Timeout
+		}
+		if c.LivenessProbe.Period == 0 {
+			c.LivenessProbe.Period = defaults.LivenessProbe.Period
+		}
+	} else if defaults.LivenessProbe !=  nil{
+		c.LivenessProbe = defaults.LivenessProbe
+	}
 
 	versions := c.Group.Vars["image_versions"]
 	versionsMap := make(map[string]interface{})
@@ -159,15 +181,15 @@ func (c *Container) PostProcess() {
 		return
 
 	}
-	if c.Group.Vars["latest_to_tag"] == "true" {
+
+	if c.Group.Get("latest_to_tag") == "true" {
 		c.LatestToTag()
 	}
 
-	if c.Group.Vars["latest_to_tag_harbor"] == "true" || c.Group.Vars["latest_to_tag_harbor"] == "all" {
+	if c.Group.Get("latest_to_tag_harbor") == "true" || c.Group.Get("latest_to_tag_harbor") == "all" {
 		LatestToTagHarbor(c)
 	}
 	log.Infof("%-25s cpu=%.f, mem=%d, tag=%s ", c.ImageName, c.Cpu, c.Mem, c.ImageTag)
-
 
 }
 
@@ -298,6 +320,12 @@ func (c Container) ToContainer() v1.Container {
 	}
 	if c.ContainerName != "" {
 		container.Name = c.ContainerName
+	}
+	if c.LivenessProbe != nil {
+		container.LivenessProbe = c.LivenessProbe.ToProbe()
+	}
+	if c.ReadinessProbe != nil {
+		container.ReadinessProbe = c.ReadinessProbe.ToProbe()
 	}
 	container.Env = c.ToEnvVars()
 	return container
@@ -451,6 +479,38 @@ func (c *Container) ToConfigMaps() []interface{} {
 	}
 
 	return configs
+}
+func (c HealthCheck) ToProbe() *v1.Probe {
+
+	probe := &v1.Probe{
+		TimeoutSeconds:      c.Timeout,
+		PeriodSeconds:       c.Period,
+		InitialDelaySeconds: c.Delay,
+	}
+
+	if c.Url != "" {
+		probe.Handler = v1.Handler{
+			HTTPGet: &v1.HTTPGetAction{
+				Path: c.Url,
+			},
+		}
+	} else if c.Port > 0 {
+		probe.Handler = v1.Handler{
+			TCPSocket: &v1.TCPSocketAction{
+				Port: intstr.FromInt(c.Port),
+			},
+		}
+	} else if c.Cmd != " " {
+		probe.Handler = v1.Handler{
+			Exec: &v1.ExecAction{
+				Command: []string{c.Cmd},
+			},
+		}
+	} else {
+		return nil
+	}
+
+	return probe
 }
 
 func NewConfigMap(_path string, content map[string]string) v1.ConfigMap {

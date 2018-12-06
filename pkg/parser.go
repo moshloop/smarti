@@ -25,7 +25,7 @@ func Parse(cmd *cobra.Command) Inventory {
 	ParseExtraVars(extra, inventory)
 
 	ParseInventory(dir, inventory)
-	ContainerDefaults(inventory)
+	ParseContainers(inventory)
 	//var hosts = make(map[string]*Host)
 
 
@@ -55,7 +55,7 @@ func Parse(cmd *cobra.Command) Inventory {
 
 
 
-func ContainerDefaults(inv Inventory) {
+func ParseContainers(inv Inventory) {
 
 	for _, group := range inv.Groups {
 		containers := group.Vars["containers"]
@@ -137,6 +137,7 @@ func ParseGroupIni(dir string, inventory Inventory) {
 	for _, section := range cfg.SectionNames() {
 		if strings.HasSuffix(section, ":children") {
 			for _, key := range cfg.GetSection(section).Keys() {
+				//FIXME what happens if the group has not been declared yet?
 				//FIXME what happens if the group has not been declared yet?
 				group := inventory.Groups[key]
 				group.ParentGroups = append(group.ParentGroups, strings.Split(section, ":")[0])

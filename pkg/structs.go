@@ -1,9 +1,10 @@
 package pkg
 
 import (
-
+	"github.com/mitchellh/mapstructure"
 	log "github.com/sirupsen/logrus"
 	"strings"
+	"fmt"
 )
 
 type Group struct {
@@ -11,6 +12,8 @@ type Group struct {
 	ParentGroups [] string
 	Vars         map[string]interface{}
 	Containers 	 []*Container
+	ContainerDefaults ContainerDefaults
+	Inventory 	*Inventory
 }
 
 type Host struct {
@@ -46,8 +49,36 @@ func (inv Inventory) AddGroup(group Group) {
 	if group.Containers == nil {
 		group.Containers = []*Container{}
 	}
+	defaults, ok := group.Vars["container_defaults"];
+	if  ok {
+		mapstructure.Decode(defaults,&group.ContainerDefaults )
+		//FIXME .Decode for some reason doesn't pick up service_type
+		service_type, ok  := defaults.(map[string]interface{})["service_type"]
+		if ok {
+			group.ContainerDefaults.ServiceType = service_type.(string)
+		}
+
+	}
 	inv.Groups[group.Name] = &group
+	group.Inventory = &inv
 }
+
+
+func (g Group) Get(key string) string {
+
+	val, ok := g.Inventory.Vars[key]
+
+	if ok {
+		return fmt.Sprintf("%v", val)
+	}
+	val, ok = g.Vars[key]
+
+	if ok {
+		return fmt.Sprintf("%v", val)
+	}
+	return ""
+}
+
 
 func (inv Inventory) AddHost(host Host) {
 	inv.Hosts[host.Name] = &host
