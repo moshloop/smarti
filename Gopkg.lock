@@ -249,12 +249,11 @@
   revision = "0b12d6b5"
 
 [[projects]]
-  branch = "master"
-  digest = "1:74f68b2d82d28b446fb3f8d00a12df551761cfef10d60379558143dbe8e6dcb5"
+  digest = "1:bb3cc4c1b21ea18cfa4e3e47440fc74d316ab25b0cf42927e8c1274917bd9891"
   name = "github.com/json-iterator/go"
   packages = ["."]
   pruneopts = "UT"
-  revision = "2ddf6d758266fcb080a4f9e054b9f292c85e6798"
+  revision = "f2b4162afba35581b6d4a50d3b8f34e33c144682"
 
 [[projects]]
   branch = "master"

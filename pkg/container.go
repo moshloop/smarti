@@ -26,6 +26,7 @@ type Container struct {
 	ImageName      string
 	ImageTag       string
 	ImageDigest    string
+	Ingress        string            `json:"ingress,omitempty"`
 	Args           []string          `json:"args,omitempty"`
 	Command        []string          `json:"command,omitempty"`
 	Entrypoint     []string          `json:"entrypoint,omitempty"`
@@ -48,9 +49,10 @@ type Container struct {
 	ContainerName  string            `json:"container_name,omitempty"`
 	Ports          []ContainerPort   `json:"ports,omitempty"`
 	Source         interface{}       `json:"source,omitempty"`
-	ReadinessProbe *HealthCheck
-	LivenessProbe  *HealthCheck
+	ReadinessProbe *HealthCheck      `json:"readinessProbe,omitempty"`
+	LivenessProbe  *HealthCheck      `json:"livenessProbe,omitempty"`
 	Group          Group
+	Specs          []interface{}
 	K8VolumeMounts []v1.VolumeMount
 	K8Volumes      []v1.Volume
 }
@@ -66,14 +68,14 @@ type HealthCheck struct {
 	Cmd     string
 	Url     string
 	Port    int
-	Period  int32
-	Timeout int32
-	Delay   int32
+	Period  int32 `json:"period,omitempty"`
+	Timeout int32 `json:"timeout,omitempty"`
+	Delay   int32 `json:"delay,omitempty"`
 }
 
 type ContainerDefaults struct {
-	ReadinessProbe *HealthCheck
-	LivenessProbe  *HealthCheck
+	ReadinessProbe *HealthCheck      `json:"readinessProbe,omitempty"`
+	LivenessProbe  *HealthCheck      `json:"livenessProbe,omitempty"`
 	ServiceType    string            `json:"service_type,omitempty"`
 	Replicas       int32             `json:"replicas,omitempty"`
 	Mem            int               `json:"mem,omitempty"`
@@ -81,6 +83,7 @@ type ContainerDefaults struct {
 	Env            map[string]string `json:"env,omitempty"`
 	Labels         map[string]string `json:"labels,omitempty"`
 	Annotations    map[string]string `json:"annotations,omitempty"`
+	Ingress        string            `json:"ingress,omitempty"`
 }
 
 func (port ContainerPort) String() string {
@@ -101,10 +104,10 @@ func (c *Container) PostProcess() {
 
 	env := make(map[string]string)
 
-	for k,v := range defaults.Env {
+	for k, v := range defaults.Env {
 		env[k] = v
 	}
-	for k,v := range c.Env {
+	for k, v := range c.Env {
 		env[k] = v
 	}
 	c.Env = env
@@ -113,11 +116,15 @@ func (c *Container) PostProcess() {
 		c.Mem = defaults.Mem
 	}
 
+	if replicas, ok := c.Group.Inventory.Vars["replicas"]; ok {
+		_replicas, _ := strconv.Atoi(fmt.Sprintf("%s", replicas))
+		c.Replicas = int32(_replicas)
+	}
+
 	if c.Replicas == 0 {
 		c.Replicas = defaults.Replicas
 	}
 
-	log.Errorf("c=%s, default=%s", c.ServiceType, defaults.ServiceType)
 	if c.ServiceType == "" {
 		c.ServiceType = defaults.ServiceType
 	}
@@ -145,27 +152,33 @@ func (c *Container) PostProcess() {
 	}
 	c.Service = ToName(c.Service)
 
+	if c.Ingress == "" && defaults.Ingress != "" {
+		c.Ingress = c.Service + "." + defaults.Ingress
+	}
 	if len(c.Ports) > 0 && c.ReadinessProbe == nil {
 		c.ReadinessProbe = &HealthCheck{
 			Port: c.Ports[0].Target,
 		}
 
-		if defaults.ReadinessProbe != nil && defaults.ReadinessProbe.Delay > 0 {
+		if defaults.ReadinessProbe != nil  {
 			c.ReadinessProbe.Delay = defaults.ReadinessProbe.Delay
+			c.ReadinessProbe.Timeout = defaults.ReadinessProbe.Timeout
+			c.ReadinessProbe.Period = defaults.ReadinessProbe.Period
+
 		}
 	}
 
 	if c.ReadinessProbe != nil && c.LivenessProbe == nil {
 		c.LivenessProbe = c.ReadinessProbe
 	}
-	if c.LivenessProbe != nil && defaults.LivenessProbe != nil{
+	if c.LivenessProbe != nil && defaults.LivenessProbe != nil {
 		if c.LivenessProbe.Timeout == 0 {
 			c.LivenessProbe.Timeout = defaults.LivenessProbe.Timeout
 		}
 		if c.LivenessProbe.Period == 0 {
 			c.LivenessProbe.Period = defaults.LivenessProbe.Period
 		}
-	} else if defaults.LivenessProbe !=  nil{
+	} else if defaults.LivenessProbe != nil {
 		c.LivenessProbe = defaults.LivenessProbe
 	}
 
@@ -210,6 +223,14 @@ func (c Container) String() string {
 
 func (c Container) ToMem() resource.Quantity {
 	qty, _ := resource.ParseQuantity(strconv.Itoa(c.Mem) + "Mi")
+	return qty
+}
+
+// Sub subtracts the provided quantity from the current value in place. If the current
+// value is zero, the format of the quantity will be updated to the format of y.
+func Ratio(q resource.Quantity, ratio int) resource.Quantity {
+	qty :=  *resource.NewScaledQuantity(q.MilliValue() / int64(ratio), resource.Milli)
+	qty.Format = q.Format
 	return qty
 }
 
@@ -263,16 +284,20 @@ func (c Container) ToContainerPorts() []v1.ContainerPort {
 func (c Container) ToResources() v1.ResourceRequirements {
 
 	limits := v1.ResourceList{}
+	requests := v1.ResourceList{}
 	if c.Mem > 0 {
 		limits[v1.ResourceMemory] = c.ToMem()
+		requests[v1.ResourceMemory] = Ratio(c.ToMem(), 2)
 	}
 	cpu, err := c.ToCpu()
 	if err == nil && cpu.Value() > 0 {
 		limits[v1.ResourceCPU] = cpu
+		requests[v1.ResourceCPU] = Ratio(cpu, 4);
 	}
 
 	return v1.ResourceRequirements{
-		Limits: limits,
+		Limits:   limits,
+		Requests: requests,
 	}
 }
 
@@ -341,6 +366,52 @@ func (c Container) ToServiceType() v1.ServiceType {
 	return v1.ServiceTypeClusterIP
 }
 
+func (c Container) ToIngress() v1beta1.Ingress {
+	return v1beta1.Ingress{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "Ingress",
+			APIVersion: "extensions/v1beta1",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name: c.Service + "-ing",
+		},
+		Spec: v1beta1.IngressSpec{
+			Rules: []v1beta1.IngressRule{
+				{
+					Host: c.Ingress,
+					IngressRuleValue: v1beta1.IngressRuleValue{
+						HTTP: &v1beta1.HTTPIngressRuleValue{
+							Paths: []v1beta1.HTTPIngressPath{
+								{
+									Backend: v1beta1.IngressBackend{
+										ServicePort: intstr.FromInt(c.Ports[0].Published),
+										ServiceName: c.Service,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+func (c Container) ToHttpIngressPaths() []v1beta1.HTTPIngressPath {
+	paths := []v1beta1.HTTPIngressPath{}
+
+	for _, port := range c.Ports {
+		paths = append(paths, v1beta1.HTTPIngressPath{
+			Backend: v1beta1.IngressBackend{
+				ServicePort: intstr.FromInt(port.Published),
+				ServiceName: c.Service,
+			},
+		})
+	}
+	return paths
+
+}
+
 func (c Container) ToDeployment() string {
 	var specs []interface{}
 	specs = append(specs, c.ToConfigMaps()...)
@@ -391,6 +462,11 @@ func (c Container) ToDeployment() string {
 				Ports: c.ToPorts(),
 			},
 		})
+
+		if c.Ingress != "" {
+			specs = append(specs, c.ToIngress())
+		}
+
 	}
 
 	out := ""
