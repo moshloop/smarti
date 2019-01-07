@@ -102,6 +102,9 @@ func (c *Container) PostProcess() {
 	//labels
 	defaults := c.Group.ContainerDefaults
 
+	log.Debugf("Defaults: %+v", defaults)
+
+
 	env := make(map[string]string)
 
 	for k, v := range defaults.Env {
@@ -151,17 +154,15 @@ func (c *Container) PostProcess() {
 	if c.Ingress == "" && defaults.Ingress != "" {
 		c.Ingress = c.Service + "." + defaults.Ingress
 	}
-	if len(c.Ports) > 0 && c.ReadinessProbe == nil {
+	if c.ReadinessProbe == nil && len(c.Ports) > 0 && defaults.ReadinessProbe != nil {
 		c.ReadinessProbe = &HealthCheck{
 			Port: c.Ports[0].Target,
 		}
 
-		if defaults.ReadinessProbe != nil  {
-			c.ReadinessProbe.Delay = defaults.ReadinessProbe.Delay
-			c.ReadinessProbe.Timeout = defaults.ReadinessProbe.Timeout
-			c.ReadinessProbe.Period = defaults.ReadinessProbe.Period
+		c.ReadinessProbe.Delay = defaults.ReadinessProbe.Delay
+		c.ReadinessProbe.Timeout = defaults.ReadinessProbe.Timeout
+		c.ReadinessProbe.Period = defaults.ReadinessProbe.Period
 
-		}
 	}
 
 	if c.ReadinessProbe != nil && c.LivenessProbe == nil {
@@ -671,18 +672,28 @@ func NewContainerFromCompose(file string, group Group) []*Container {
 			if service.Hostname != "" {
 				c.Hostname = service.Hostname
 			}
-			//if service.HealthCheck != nil {
-			//	c.HealthCheck = service.HealthCheck
-			//}
+			if service.HealthCheck != nil && len(service.Ports) > 0{
+				c.ReadinessProbe = &HealthCheck{
+				}
+
+				if service.HealthCheck.Interval != nil {
+					c.ReadinessProbe.Period = int32(service.HealthCheck.Interval.Seconds())
+				}
+				if service.HealthCheck.StartPeriod != nil {
+					c.ReadinessProbe.Delay = int32(service.HealthCheck.StartPeriod.Seconds())
+				}
+				if service.HealthCheck.Timeout != nil {
+					c.ReadinessProbe.Timeout = int32(service.HealthCheck.Timeout.Seconds())
+				}
+				c.ReadinessProbe.Port = int(service.Ports[0].Published)
+			}
 			if service.Image != "" {
 				c.Image = service.Image
 			}
-			if len(service.Labels) != 0 {
+			if len(service.Labels) > 0 {
 				c.Labels = service.Labels
 			}
-			if len(service.Ports) != 0 {
-				//c.Ports =
-
+			if len(service.Ports) > 0 {
 				for _, port := range service.Ports {
 					c.Ports = append(c.Ports, ContainerPort{
 						Target:    int(port.Target),

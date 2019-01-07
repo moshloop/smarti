@@ -90,3 +90,11 @@ func homeDir() string {
 	}
 	return os.Getenv("USERPROFILE") // windows
 }
+
+func PutAllIfAbsent(from map[string]string, into map[string]string) {
+	for k,v  := range from {
+		if _, ok := into[k]; !ok {
+			into[k] = v
+		}
+	}
+}

@@ -183,4 +183,39 @@ func ParseGroups(dir string, inventory Inventory) {
 		}
 		inventory.AddGroup(group)
 	}
+	all := inventory.Groups["all"]
+
+	// marge all container defaults into each group
+	for name, group := range inventory.Groups {
+		if name == "all" {
+			continue
+		}
+		if all.ContainerDefaults.ReadinessProbe != nil && group.ContainerDefaults.ReadinessProbe == nil {
+			group.ContainerDefaults.ReadinessProbe = all.ContainerDefaults.ReadinessProbe
+		}
+
+		if all.ContainerDefaults.LivenessProbe != nil && group.ContainerDefaults.LivenessProbe == nil{
+			group.ContainerDefaults.LivenessProbe = all.ContainerDefaults.LivenessProbe
+		}
+
+		if all.ContainerDefaults.Ingress != "" && group.ContainerDefaults.Ingress == "" {
+			group.ContainerDefaults.Ingress = all.ContainerDefaults.Ingress
+		}
+
+		if all.ContainerDefaults.Replicas > 0 && group.ContainerDefaults.Replicas == 0 {
+			group.ContainerDefaults.Replicas = all.ContainerDefaults.Replicas
+		}
+
+		if all.ContainerDefaults.Mem > 0 && group.ContainerDefaults.Mem == 0 {
+			group.ContainerDefaults.Mem = all.ContainerDefaults.Mem
+		}
+
+		if all.ContainerDefaults.Cpu != "" && all.ContainerDefaults.Cpu != 0 && group.ContainerDefaults.Cpu == "" || group.ContainerDefaults.Cpu == 0 {
+			group.ContainerDefaults.Cpu = all.ContainerDefaults.Cpu
+		}
+
+		PutAllIfAbsent(all.ContainerDefaults.Env, group.ContainerDefaults.Env)
+		PutAllIfAbsent(all.ContainerDefaults.Labels, group.ContainerDefaults.Labels)
+		PutAllIfAbsent(all.ContainerDefaults.Annotations, group.ContainerDefaults.Annotations)
+	}
 }
