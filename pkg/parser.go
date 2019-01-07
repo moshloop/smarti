@@ -63,6 +63,7 @@ func ParseContainers(inv Inventory) {
 		if containers != nil {
 			for _, container := range containers.([]interface{}) {
 				c := new(Container)
+				c.Replicas = 1
 				deepcopy.Copy(c, container)
 				c.Group = *group
 				group.Containers = append(group.Containers, c)

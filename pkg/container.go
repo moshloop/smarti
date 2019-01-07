@@ -121,10 +121,6 @@ func (c *Container) PostProcess() {
 		c.Replicas = int32(_replicas)
 	}
 
-	if c.Replicas == 0 {
-		c.Replicas = defaults.Replicas
-	}
-
 	if c.ServiceType == "" {
 		c.ServiceType = defaults.ServiceType
 	}
@@ -218,7 +214,7 @@ func (port *ContainerPort) UnmarshalJSON(b []byte) error {
 }
 
 func (c Container) String() string {
-	return fmt.Sprintf("%s/%s[%s, %dMb]env:%v, ports:%v", c.Service, c.Image, c.Cpu, c.Mem, c.Env, c.Ports)
+	return fmt.Sprintf("%s/%s[%s, %dMb]env:%v, ports:%v, replicas:%v", c.Service, c.Image, c.Cpu, c.Mem, c.Env, c.Ports, c.Replicas)
 }
 
 func (c Container) ToMem() resource.Quantity {
@@ -633,6 +629,7 @@ func NewContainerFromCompose(file string, group Group) []*Container {
 	if currentConfig != nil && currentConfig.Services != nil {
 		for _, service := range currentConfig.Services {
 			c := new(Container)
+			c.Replicas =1
 			c.Group = group
 			c.Service = service.Name
 			if len(service.Command) != 0 {
@@ -647,7 +644,6 @@ func NewContainerFromCompose(file string, group Group) []*Container {
 				replicas := int32(*service.Deploy.Replicas)
 				c.Replicas = replicas
 			}
-
 			if service.Deploy.EndpointMode != "" {
 				c.ServiceType = service.Deploy.EndpointMode
 			}
